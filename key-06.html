@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>照片標註工具 (時間版)</title>
+        <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+        <style>
+            body {
+                font-family: sans-serif;
+                padding: 10px;
+                background-color: #f0f0f0;
+            }
+            .card {
+                background: white;
+                padding: 10px;
+                margin-bottom: 15px;
+                border-radius: 8px;
+                box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            }
+            .preview {
+                width: 100%;
+                height: auto;
+                border-radius: 4px;
+                margin-bottom: 8px;
+                display: block;
+            }
+            input[type="text"] {
+                width: 100%;
+                padding: 12px;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                box-sizing: border-box;
+            }
+            .btn-group {
+                display: flex;
+                gap: 10px;
+                margin-bottom: 15px;
+                position: sticky;
+                top: 0;
+                background: #f0f0f0;
+                padding: 10px 0;
+                z-index: 10;
+            }
+            button {
+                flex: 1;
+                padding: 12px;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+                color: white;
+                font-weight: bold;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="btn-group">
+            <button
+                style="background: #28a745"
+                onclick="document.getElementById('filePicker').click()"
+            >
+                + 選擇照片
+            </button>
+            <button style="background: #17a2b8" onclick="exportData()">
+                匯出 CSV
+            </button>
+            <button style="background: #dc3545" onclick="clearData()">
+                清空
+            </button>
+        </div>
+        <input
+            type="file"
+            id="filePicker"
+            multiple
+            accept="image/*"
+            style="display: none"
+        />
+        <div id="list"></div>
+
+        <script>
+            let photoData = JSON.parse(localStorage.getItem("timeTags")) || [];
+            let imageUrls = JSON.parse(localStorage.getItem("timeUrls")) || {}; // id -> objectURL (僅限本次 session 有效)
+
+            document.getElementById("filePicker").onchange = async (e) => {
+                for (const file of Array.from(e.target.files)) {
+                    // 讀取 EXIF 拍攝時間
+                    EXIF.getData(file, function () {
+                        const dateTaken =
+                            EXIF.getTag(this, "DateTimeOriginal") ||
+                            file.lastModified.toString();
+                        const uniqueId = dateTaken.toString(); // 用拍攝時間作為 ID
+
+                        if (!photoData.some((p) => p.id === uniqueId)) {
+                            // 產生圖片預覽網址
+                            imageUrls[uniqueId] = URL.createObjectURL(file);
+                            photoData.push({
+                                id: uniqueId,
+                                name: file.name,
+                                size: file.size,
+                                tags: "",
+                            });
+                            render();
+                        }
+                    });
+                }
+            };
+
+            function render() {
+                const list = document.getElementById("list");
+                list.innerHTML = photoData
+                    .map(
+                        (p, i) => `
+                    <div class="card">
+                        <img class="preview" src="${imageUrls[p.id] || ""}" alt="預覽" onerror="this.style.display='none'">
+                        <div style="font-size:12px; color:#666; margin-bottom:5px;">時間ID: ${p.id} | ${p.name}</div>
+                        <input type="text" value="${p.tags}" placeholder="輸入標籤..." onchange="updateTag(${i}, this.value)">
+                    </div>
+                `,
+                    )
+                    .join("");
+                localStorage.setItem("timeTags", JSON.stringify(photoData));
+            }
+
+            function updateTag(i, val) {
+                photoData[i].tags = val;
+                localStorage.setItem("timeTags", JSON.stringify(photoData));
+            }
+
+            function exportData() {
+                let csv =
+                    "\uFEFFDateTimeOriginal,OriginalName,FileSize,Caption-Abstract\n";
+                photoData.forEach((p) => {
+                    csv += `"${p.id}","${p.name}",${p.size},"${p.tags.replace(/"/g, '""')}"\n`;
+                });
+                const now = new Date();
+                const ts =
+                    now.getFullYear() +
+                    String(now.getMonth() + 1).padStart(2, "0") +
+                    String(now.getDate()).padStart(2, "0") +
+                    "-" +
+                    String(now.getHours()).padStart(2, "0") +
+                    String(now.getMinutes()).padStart(2, "0") +
+                    String(now.getSeconds()).padStart(2, "0");
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(
+                    new Blob([csv], { type: "text/csv" }),
+                );
+                link.download = `photo_tags_${ts}.csv`;
+                link.click();
+            }
+
+            function clearData() {
+                if (confirm("確定清空？")) {
+                    Object.values(imageUrls).forEach((url) =>
+                        URL.revokeObjectURL(url),
+                    );
+                    imageUrls = {};
+                    localStorage.removeItem("timeTags");
+                    localStorage.removeItem("timeUrls");
+                    photoData = [];
+                    render();
+                }
+            }
+            render();
+        </script>
+    </body>
+</html>
